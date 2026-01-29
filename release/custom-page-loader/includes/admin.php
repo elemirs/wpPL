@@ -398,12 +398,38 @@ function cpl_handle_form_submission() {
         if ( is_wp_error( $unzip_result ) ) {
             echo '<div class="notice notice-error"><p>Unzip failed: ' . $unzip_result->get_error_message() . '</p></div>';
         } else {
+            // Flatten directory structure (move all files to root)
+            cpl_flatten_directory( $target_dir );
+
             $pages[ $slug ] = [
                 'folder' => $folder_name,
                 'uploaded_at' => current_time( 'mysql' )
             ];
             update_option( 'cpl_static_pages', $pages );
             echo '<div class="notice notice-success"><p>Static page deployed successfully!</p></div>';
+        }
+    }
+}
+
+function cpl_flatten_directory( $dir ) {
+    if ( ! is_dir( $dir ) ) return;
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $target_path = $dir . DIRECTORY_SEPARATOR . $file->getFilename();
+            // Move only if not already at root
+            if ( $file->getPathname() !== $target_path ) {
+                // If file with same name exists at root, it will be overwritten
+                @rename( $file->getPathname(), $target_path );
+            }
+        } else {
+            // Remove empty directories
+            @rmdir( $file->getPathname() );
         }
     }
 }

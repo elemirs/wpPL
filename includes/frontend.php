@@ -3,93 +3,196 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-add_action( 'template_redirect', 'cpl_intercept_request' );
+// Ensure the hook is added with high priority (1)
+add_action( 'template_redirect', 'cpl_intercept_request', 1 );
 
 function cpl_intercept_request() {
+    // Debug Mode
+    if ( isset( $_GET['cpl_debug'] ) && current_user_can( 'manage_options' ) ) {
+        cpl_debug_info();
+    }
+
     $pages = get_option( 'cpl_static_pages', [] );
     if ( empty( $pages ) ) {
         return;
     }
 
-    $current_slug = '';
-
-    if ( is_front_page() || is_home() ) {
-        $current_slug = 'home';
-    } else {
-        global $wp;
-        // Get the current slug (e.g. 'about-us' or 'landing/v1')
-        $current_slug = $wp->request;
+    global $wp;
+    $request_uri = $_SERVER['REQUEST_URI'];
+    // Remove query string
+    $request_path = strtok( $request_uri, '?' );
+    // Remove trailing slash if mostly equivalent (normalize) but keep root /
+    if ( $request_path !== '/' ) {
+        $request_path = untrailingslashit( $request_path );
     }
 
-    // Check if we have a mapping for this slug
-    if ( isset( $pages[ $current_slug ] ) ) {
-        $folder = $pages[ $current_slug ]['folder'];
-        $base_path = CPL_UPLOAD_DIR . '/' . $folder;
-        $base_url = CPL_UPLOAD_URL . '/' . $folder . '/';
-        $index_file = $base_path . '/index.html';
+    // --- 1. Aggressive Home Detection ---
+    // If we are at root /, and we have a 'home' page configured.
+    // We check /index.php too just in case.
+    if ( ( $request_path === '/' || $request_path === '/index.php' ) && isset( $pages['home'] ) ) {
+        cpl_serve_landing_page( $pages['home'], 'home' );
+        exit;
+    }
 
-        if ( file_exists( $index_file ) ) {
-            // Stop WordPress processing and serve file
-            cpl_serve_file( $index_file, $base_url, $base_path );
+    // --- 2. WP Standard Detection (Backup) ---
+    // Fallback if the path didn't match / but WP thinks it is home
+    if ( ( is_front_page() || is_home() ) && isset( $pages['home'] ) ) {
+        cpl_serve_landing_page( $pages['home'], 'home' );
+        exit;
+    }
+
+    // --- 3. Sub-page Detection using URL path ---
+    // Breakdown the path to find potential slug
+    $path_parts = explode( '/', trim( $request_path, '/' ) );
+    
+    // Iterate over configured pages to see if the current path matches
+    foreach ( $pages as $p_slug => $data ) {
+        // Skip home here, already handled
+        if ( $p_slug === 'home' ) continue;
+
+        // Exact match for the page itself (e.g. /my-landing-page)
+        if ( $request_path === '/' . $p_slug ) {
+            cpl_serve_landing_page( $data, $p_slug );
             exit;
         }
+
+        // Asset check for this page (e.g. /my-landing-page/assets/style.css)
+        if ( strpos( $request_path, '/' . $p_slug . '/' ) === 0 ) {
+            $asset_rel_path = substr( $request_path, strlen( '/' . $p_slug . '/' ) );
+            if ( cpl_check_and_serve_asset( $data['folder'], $asset_rel_path ) ) {
+                exit;
+            }
+        }
+    }
+
+    // --- 4. Home Assets Fallback ---
+    // If we have a home page, maybe this request is for an asset at the root level?
+    // e.g. /assets/style.css -> we check if 'home' folder has assets/style.css
+    if ( isset( $pages['home'] ) ) {
+        $asset_path = trim( $request_path, '/' );
+        // Avoid intercepting critical WP paths
+        if ( strpos( $asset_path, 'wp-' ) !== 0 && $asset_path !== 'index.php' && $asset_path !== 'xmlrpc.php' ) {
+            if ( cpl_check_and_serve_asset( $pages['home']['folder'], $asset_path ) ) {
+                exit;
+            }
+        }
     }
 }
 
-function cpl_serve_file( $file_path, $base_url, $base_path_dir ) {
-    // Read the file content
-    $content = file_get_contents( $file_path );
+function cpl_serve_landing_page( $page_data, $slug ) {
+    $folder = $page_data['folder'];
+    $base_path = CPL_UPLOAD_DIR . '/' . $folder;
+    $index_file = $base_path . '/index.html';
+
+    if ( file_exists( $index_file ) ) {
+        $content = file_get_contents( $index_file );
+        
+        // Inject <base> tag. 
+        $virtual_base = home_url( '/' . ($slug === 'home' ? '' : $slug . '/') );
+        $base_tag = '<base href="' . esc_url( $virtual_base ) . '">';
+        
+        if ( stripos( $content, '<head>' ) !== false ) {
+            $content = preg_replace( '/<head>/i', "<head>\n" . $base_tag, $content, 1 );
+        } else {
+            $content = $base_tag . $content;
+        }
+
+        header( 'Content-Type: text/html; charset=utf-8' );
+        echo $content;
+    }
+}
+
+function cpl_check_and_serve_asset( $folder, $relative_path ) {
+    if ( empty( $relative_path ) ) return false;
+
+    // Decode URL
+    $relative_path = urldecode( $relative_path );
+    $base_dir = CPL_UPLOAD_DIR . '/' . $folder;
+
+    // 1. Try Exact Path
+    $full_path = $base_dir . '/' . $relative_path;
+    if ( cpl_try_serve_file( $full_path, $base_dir ) ) {
+        return true;
+    }
     
-    // 1. Fix paths (The "Smart Path Fixer")
-    // Use regex to replace relative or root-relative paths with absolute URLs if files exist
-    $content = preg_replace_callback( '/(src|href)=([\'"])(.*?)\2/i', function($matches) use ($base_path_dir, $base_url) {
-        $attr = $matches[1];
-        $quote = $matches[2];
-        $url = $matches[3];
-
-        // Skip absolute URLs, anchors, mailto, etc.
-        // Also skip definition of base tag itself if present
-        if ( strpos($url, '//') !== false || strpos($url, 'http') === 0 || strpos($url, 'data:') === 0 || strpos($url, '#') === 0 || strpos($url, 'mailto:') === 0 ) {
-            return $matches[0];
+    // 2. Try Flattened Path (Root of page folder)
+    // Helps if HTML asks for "assets/img/logo.png" but user uploaded "logo.png" at root
+    $flat_name = basename( $relative_path );
+    $flat_path = $base_dir . '/' . $flat_name;
+    
+    if ( $flat_path !== $full_path ) {
+        if ( cpl_try_serve_file( $flat_path, $base_dir ) ) {
+            return true;
         }
+    }
+    
+    return false;
+}
 
-        // Clean path to check existence (remove leading / or ./)
-        $clean_path = ltrim( $url, '/.' );
-        
-        // Remove query strings for file checking
-        $clean_path_file = strtok( $clean_path, '?' );
+function cpl_try_serve_file( $path, $base_folder_path ) {
+    if ( ! file_exists( $path ) ) return false;
+    
+    $real_path = realpath( $path );
+    $real_base = realpath( $base_folder_path );
+    
+    // Security check: ensure file is inside the base folder
+    if ( $real_path && $real_base && strpos( $real_path, $real_base ) === 0 && ! is_dir( $real_path ) ) {
+        cpl_serve_file_content( $real_path );
+        return true;
+    }
+    return false;
+}
 
-        if ( file_exists( $base_path_dir . '/' . $clean_path_file ) ) {
-            // File exists! Replace with full absolute URL using our base
-            // Remove leading slash from cleaned path to avoid double slashes with base URL
-            return $attr . '=' . $quote . $base_url . $clean_path . $quote;
+function cpl_serve_file_content( $file_path ) {
+    $mime = wp_check_filetype( $file_path );
+    $content_type = $mime['type'];
+    
+    if ( ! $content_type ) {
+        $ext = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+        $types = [
+            'css' => 'text/css',
+            'js' => 'application/javascript',
+            'svg' => 'image/svg+xml',
+            'json' => 'application/json',
+            'png' => 'image/png',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'woff' => 'font/woff',
+            'woff2' => 'font/woff2',
+            'ttf' => 'font/ttf',
+            'eot' => 'application/vnd.ms-fontobject',
+            'map' => 'application/json'
+        ];
+        if ( isset( $types[$ext] ) ) {
+            $content_type = $types[$ext];
         }
-
-        // Try checking without leading "./" if present (Vite often outputs ./assets/...)
-        $alt_path = ltrim($url, '.'); // removes . from start
-        $alt_path = ltrim($alt_path, '/'); // then removes /
-        $alt_path_file = strtok($alt_path, '?');
-        
-        if ( file_exists( $base_path_dir . '/' . $alt_path_file ) ) {
-             return $attr . '=' . $quote . $base_url . $alt_path . $quote;
-        }
-
-        return $matches[0];
-    }, $content );
-
-    // 2. Inject <base> tag as fallback (for CSS images etc)
-    // Inject just after <head>
-    $base_tag = '<base href="' . esc_url( $base_url ) . '">';
-    if ( stripos( $content, '<head>' ) !== false ) {
-        $content = preg_replace( '/<head>/i', "<head>\n" . $base_tag, $content, 1 );
-    } else {
-        $content = $base_tag . $content;
     }
 
-    // Set correct headers
-    header( 'Content-Type: text/html; charset=utf-8' );
-    // Prevent caching during development/troubleshooting
-    header( 'Cache-Control: no-store, no-cache, must-revalidate' );
+    if ( $content_type ) {
+        header( 'Content-Type: ' . $content_type );
+    }
     
-    echo $content;
+    header( 'Cache-Control: public, max-age=86400' );
+    header( 'Access-Control-Allow-Origin: *' ); 
+    
+    readfile( $file_path );
+    exit;
 }
+
+function cpl_debug_info() {
+    $pages = get_option( 'cpl_static_pages', [] );
+    echo '<div style="background:white; padding:20px; border:5px solid red; position:fixed; top:0; left:0; z-index:99999; color:black; max-width:500px; height: 100vh; overflow:auto;">';
+    echo '<h3>CPL Debug Info</h3>';
+    echo '<p>If you see this, the plugin is active and running.</p>';
+    echo '<pre>';
+    echo 'Request URI: ' . $_SERVER['REQUEST_URI'] . "\n";
+    echo 'Is Front Page: ' . (is_front_page() ? 'Yes' : 'No') . "\n";
+    echo 'Is Home: ' . (is_home() ? 'Yes' : 'No') . "\n";
+    echo 'Pages Config: ' . print_r($pages, true);
+    echo '</pre>';
+    echo '</div>';
+    exit; 
+}
+
+
