@@ -3,7 +3,7 @@
 Plugin Name: Custom Static Page Loader
 Plugin URI: https://example.com/
 Description: Upload custom HTML/CSS/JS files to replace specific WordPress pages.
-Version: 1.0
+Version: 1.0.260129-fixed5
 Author: Your Name
 Author URI: https://example.com/
 License: GPLv2 or later
