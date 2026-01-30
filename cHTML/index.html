@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Post</title>
+    <!-- Base tag is injected by the plugin -->
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Base styles if style.css fails to load */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif; margin: 0; line-height: 1.6; color: #333; background: #f9f9f9; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; background: #fff; min-height: 80vh; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .loading { text-align: center; padding: 50px; color: #888; }
+        #featured-image { width: 100%; height: auto; border-radius: 8px; margin-bottom: 20px; display: none; }
+        h1 { font-size: 2.5rem; margin-bottom: 10px; line-height: 1.2; }
+        .meta { color: #888; font-size: 0.9rem; margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        .content { font-size: 1.1rem; line-height: 1.8; }
+        .content img { max-width: 100%; height: auto; }
+        .back-link { display: inline-block; margin-bottom: 20px; text-decoration: none; color: #0073aa; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <a href="/" class="back-link">&larr; Ana Sayfaya Dön</a>
+        
+        <div id="loading" class="loading">
+            <svg style="width:50px;height:50px;animation:spin 1s linear infinite" viewBox="0 0 50 50">
+                <circle cx="25" cy="25" r="20" fill="none" stroke="#ddd" stroke-width="5"></circle>
+                <circle cx="25" cy="25" r="20" fill="none" stroke="#0073aa" stroke-width="5" stroke-dasharray="80" stroke-dashoffset="60"></circle>
+            </svg>
+            <p>İçerik Yükleniyor...</p>
+        </div>
+
+        <article id="post-article" style="display:none;">
+            <img id="featured-image" src="" alt="Featured Image">
+            <h1 id="post-title"></h1>
+            <div class="meta">
+                <span id="post-date"></span> | Yazar: <span id="post-author"></span>
+            </div>
+            <div id="post-content" class="content"></div>
+        </article>
+
+        <div id="error-message" style="display:none; text-align:center; padding:50px; color:red;">
+            <h2>Yazı Bulunamadı</h2>
+            <p>Aradığınız içerik silinmiş veya taşınmış olabilir.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 1. Get Slug from URL
+            // Path: /my-post-name/ or /my-post-name
+            const pathSegments = window.location.pathname.split('/').filter(p => p.length > 0);
+            const slug = pathSegments[pathSegments.length - 1];
+
+            if (!slug) {
+                showError('Geçersiz URL');
+                return;
+            }
+
+            // 2. Fetch Data
+            // Add Cache Busting
+            const apiUrl = `/wp-json/wp/v2/posts?slug=${slug}&_embed&v=${Date.now()}`;
+
+            fetch(apiUrl)
+                .then(response => {
+                    if (!response.ok) throw new Error('API Error');
+                    return response.json();
+                })
+                .then(posts => {
+                    if (posts.length === 0) {
+                        showError('Yazı bulunamadı.');
+                        return;
+                    }
+                    renderPost(posts[0]);
+                })
+                .catch(err => {
+                    console.error(err);
+                    showError('Bir hata oluştu.');
+                });
+        });
+
+        function renderPost(post) {
+            document.getElementById('loading').style.display = 'none';
+            const article = document.getElementById('post-article');
+            article.style.display = 'block';
+
+            // Title
+            document.getElementById('post-title').innerHTML = post.title.rendered;
+            
+            // Content
+            document.getElementById('post-content').innerHTML = post.content.rendered;
+            
+            // Date
+            const date = new Date(post.date);
+            document.getElementById('post-date').textContent = date.toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' });
+            
+            // Author
+            if (post._embedded && post._embedded.author) {
+                document.getElementById('post-author').textContent = post._embedded.author[0].name;
+            }
+
+            // Featured Image
+            if (post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0]) {
+                const imgUrl = post._embedded['wp:featuredmedia'][0].source_url;
+                const imgEl = document.getElementById('featured-image');
+                imgEl.src = imgUrl;
+                imgEl.style.display = 'block';
+            }
+            
+            // Update Page Title
+            document.title = post.title.rendered + ' - Blog';
+        }
+
+        function showError(msg) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error-message').style.display = 'block';
+        }
+    </script>
+    <style>
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</body>
+</html>

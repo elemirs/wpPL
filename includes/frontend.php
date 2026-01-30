@@ -64,8 +64,29 @@ function cpl_intercept_request() {
             }
         }
     }
+    
+    // --- 4. Single Post Template Detection ---
+    if ( is_single() ) {
+        $post_template = get_option('cpl_post_template', []);
+        if ( ! empty( $post_template['active'] ) ) {
+            cpl_serve_landing_page( $post_template, 'POST_TEMPLATE' );
+            exit;
+        }
+    }
 
-    // --- 4. Home Assets Fallback ---
+    // --- 5. Post Template Assets Detection (Virtual Path) ---
+    // Detects requests like /_cpl_pt/style.css
+    if ( strpos( $request_path, '/_cpl_pt/' ) === 0 ) {
+         $asset_rel_path = substr( $request_path, strlen( '/_cpl_pt/' ) );
+         $post_template = get_option('cpl_post_template', []);
+         if ( ! empty( $post_template['active'] ) ) {
+             if ( cpl_check_and_serve_asset( $post_template['folder'], $asset_rel_path ) ) {
+                 exit;
+             }
+         }
+    }
+    
+    // --- 6. Home Assets Fallback ---
     // If we have a home page, maybe this request is for an asset at the root level?
     // e.g. /assets/style.css -> we check if 'home' folder has assets/style.css
     if ( isset( $pages['home'] ) ) {
@@ -88,7 +109,14 @@ function cpl_serve_landing_page( $page_data, $slug ) {
         $content = file_get_contents( $index_file );
         
         // Inject <base> tag. 
-        $virtual_base = home_url( '/' . ($slug === 'home' ? '' : $slug . '/') );
+        if ( $slug === 'POST_TEMPLATE' ) {
+            // Special Virtual Asset Path for Posts
+            $virtual_base = home_url( '/_cpl_pt/' );
+        } else {
+             // Standard Pages
+            $virtual_base = home_url( '/' . ($slug === 'home' ? '' : $slug . '/') );
+        }
+        
         $base_tag = '<base href="' . esc_url( $virtual_base ) . '">';
         
         if ( stripos( $content, '<head>' ) !== false ) {

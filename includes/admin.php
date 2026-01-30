@@ -66,19 +66,40 @@ function cpl_search_pages_callback() {
 add_action( 'admin_menu', 'cpl_add_admin_menu' );
 
 function cpl_add_admin_menu() {
+    // Top Level Menu
 	add_menu_page(
-		'Custom Static Pages',
-		'Custom Pages',
+		'Custom Page Loader',
+		'Custom Page Loader',
 		'manage_options',
-		'custom-static-pages',
-		'cpl_render_admin_page',
+		'cpl-main',
+		'cpl_render_static_pages_page',
 		'dashicons-media-code',
 		20
 	);
+    
+    // Submenu: Static Pages (Default)
+    add_submenu_page(
+        'cpl-main',
+        'Static Pages',
+        'Static Pages',
+        'manage_options',
+        'cpl-main',
+        'cpl_render_static_pages_page'
+    );
+
+    // Submenu: Post Template
+    add_submenu_page(
+        'cpl-main',
+        'Single Post Template',
+        'Post Template',
+        'manage_options',
+        'cpl-post-template',
+        'cpl_render_post_template_page'
+    );
 }
 
-// Render Admin Page
-function cpl_render_admin_page() {
+// Render Static Pages (Main Tab)
+function cpl_render_static_pages_page() {
     // Check for Inspection View
     if ( isset( $_GET['action'] ) && $_GET['action'] === 'inspect' && ! empty( $_GET['slug'] ) ) {
         cpl_render_inspection_page( sanitize_text_field( $_GET['slug'] ) );
@@ -94,6 +115,7 @@ function cpl_render_admin_page() {
 	?>
 	<div class="wrap">
 		<h1>Custom Static Pages Manager</h1>
+        <p>Manage custom HTML templates for specific pages (Home, About, etc).</p>
         
         <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 20px;">
             <div class="card" style="flex: 1; min-width: 300px; padding: 20px; margin-top: 0;">
@@ -351,6 +373,119 @@ function cpl_render_admin_page() {
         .ui-helper-hidden-accessible { display: none; }
     </style>
 	<?php
+}
+
+// Render Post Template Page
+function cpl_render_post_template_page() {
+    // Handle Form Submission
+	if ( isset( $_POST['cpl_action'] ) && check_admin_referer( 'cpl_post_template_action', 'cpl_nonce' ) ) {
+        cpl_handle_post_template_submission();
+    }
+    
+    $post_template = get_option( 'cpl_post_template', [] ); // ['active' => bool, 'uploaded_at' => date]
+
+    ?>
+    <div class="wrap">
+        <h1>Single Post Template</h1>
+        <p>Upload a single HTML design (`.zip`) that will replace the design of <strong>ALL single blog posts</strong>.</p>
+        
+        <div class="card" style="max-width: 600px; padding: 20px; margin-top: 20px;">
+            <h2>Upload Template</h2>
+            
+            <?php if ( ! empty( $post_template['active'] ) ) : ?>
+                <div class="notice notice-success inline" style="margin: 0 0 20px 0;">
+                    <p>
+                        <strong>✅ Template Active</strong><br>
+                        Last updated: <?php echo esc_html( $post_template['uploaded_at'] ); ?>
+                    </p>
+                </div>
+            <?php else : ?>
+                <div class="notice notice-warning inline" style="margin: 0 0 20px 0;">
+                    <p>No custom post template uploaded. WordPress default theme is used.</p>
+                </div>
+            <?php endif; ?>
+
+            <form method="post" enctype="multipart/form-data">
+                <input type="hidden" name="cpl_action" value="upload_post_template">
+                <?php wp_nonce_field( 'cpl_post_template_action', 'cpl_nonce' ); ?>
+                
+                <p>
+                    <label style="display:block; margin-bottom:5px;"><strong>Select .zip File (index.html, style.css...)</strong></label>
+                    <input type="file" name="post_template_file" accept=".zip" required>
+                </p>
+                
+                <p class="description">
+                    The HTML file should use JavaScript to fetch content based on the current post slug.<br>
+                    <a href="#" onclick="jQuery('#cpl_structure_modal').fadeIn(); return false;">See required structure</a>
+                </p>
+
+                <p class="submit">
+                    <input type="submit" class="button button-primary" value="Upload & Apply">
+                    
+                    <?php if ( ! empty( $post_template['active'] ) ) : ?>
+                        <input type="submit" name="delete_template" class="button button-link-delete" value="Disable & Delete Template" 
+                               onclick="return confirm('Are you sure? This will revert all posts to standard theme.');">
+                    <?php endif; ?>
+                </p>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Reuse the same modal structure -->
+    <div id="cpl_structure_modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:99999;">
+        <div style="background:#fff; width:90%; max-width:550px; margin: 100px auto; padding:30px; border-radius:8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); position:relative;">
+            <h2 style="margin-top:0;">Template Structure</h2>
+            <p>Your ZIP must include <code>index.html</code> at the root.</p>
+            <div style="background:#f0f6e6; border:1px solid #7ad03a; padding:15px;">
+                <code>post-design.zip</code><br>
+                <code>├── index.html</code><br>
+                <code>├── style.css</code>
+            </div>
+            <div style="text-align:right; margin-top:20px;">
+                <button type="button" class="button" onclick="jQuery('#cpl_structure_modal').fadeOut()">Close</button>
+            </div>
+        </div>
+    </div>
+    <?php
+}
+
+function cpl_handle_post_template_submission() {
+    if ( isset( $_POST['delete_template'] ) ) {
+        cpl_delete_directory( CPL_UPLOAD_DIR . '/_post_template' );
+        delete_option( 'cpl_post_template' );
+        echo '<div class="notice notice-info"><p>Post template deleted.</p></div>';
+        return;
+    }
+
+    if ( empty( $_FILES['post_template_file'] ) || $_FILES['post_template_file']['error'] !== UPLOAD_ERR_OK ) {
+        echo '<div class="notice notice-error"><p>Upload failed.</p></div>';
+        return;
+    }
+
+    require_once( ABSPATH . 'wp-admin/includes/file.php' );
+    WP_Filesystem();
+
+    $temp_file = $_FILES['post_template_file']['tmp_name'];
+    $target_dir = CPL_UPLOAD_DIR . '/_post_template';
+
+    // Clean existing
+    cpl_delete_directory( $target_dir );
+
+    $unzip_result = unzip_file( $temp_file, $target_dir );
+
+    if ( is_wp_error( $unzip_result ) ) {
+        echo '<div class="notice notice-error"><p>' . $unzip_result->get_error_message() . '</p></div>';
+    } else {
+        cpl_flatten_directory( $target_dir );
+        
+        update_option( 'cpl_post_template', [
+            'active' => true,
+            'folder' => '_post_template',
+            'uploaded_at' => current_time( 'mysql' )
+        ] );
+        
+        echo '<div class="notice notice-success"><p>Post template updated!</p></div>';
+    }
 }
 
 function cpl_handle_form_submission() {
