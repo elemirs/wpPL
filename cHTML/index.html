@@ -198,16 +198,44 @@ a:hover { opacity: 0.8; }
     box-shadow: 0 5px 15px rgba(0,0,0,0.1);
 }
 
+/* Lists Fix */
+.entry-content ul, .entry-content ol {
+    margin: 20px 0;
+    padding-left: 0;
+    list-style-position: inside; /* Bullet align with text */
+}
+
+/* Nested lists (sub-items) should have indentation */
+.entry-content ul ul, .entry-content ol ol,
+.entry-content ul ol, .entry-content ol ul {
+    padding-left: 30px;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+.entry-content li {
+    margin-bottom: 10px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     .post-hero { height: 60vh; padding-bottom: 40px; }
     #post-title { font-size: 2.2rem; }
     .content-wrapper { margin-top: 0; border-radius: 0; padding: 30px 20px; box-shadow: none; }
+    
+    /* Fix Mobile Back Button (Keep Circle) */
     .back-link { 
         top: 20px; 
-        left: 20px; 
-        padding: 8px 16px;
-        font-size: 0.75rem; 
+        left: 20px;
+        /* Reset any potential padding override from previous tweaks */
+    }
+
+    /* Remove List Indentation on Mobile */
+    .entry-content ul, .entry-content ol,
+    .entry-content ul ul, .entry-content ol ol,
+    .entry-content ul ol, .entry-content ol ul {
+        padding-left: 0 !important;
+        margin-left: 0 !important;
     }
 }
     </style>
