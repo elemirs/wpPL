@@ -238,6 +238,66 @@ a:hover { opacity: 0.8; }
         margin-left: 0 !important;
     }
 }
+
+/* Related Posts Slider */
+.related-section {
+    max-width: 1000px;
+    margin: 0 auto 80px;
+    padding: 0 20px;
+}
+.related-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    color: var(--primary);
+    margin-bottom: 30px;
+    text-align: left;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 15px;
+}
+.related-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 30px;
+}
+.post-card {
+    background: var(--white);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    display: flex;
+    flex-direction: column;
+}
+.post-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+.card-img {
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+}
+.card-body {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.card-body h4 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.25rem;
+    margin: 0 0 15px;
+    line-height: 1.4;
+    color: var(--primary);
+}
+.read-more {
+    margin-top: auto;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+}
+
     </style>
 </head>
 <body>
@@ -270,6 +330,12 @@ a:hover { opacity: 0.8; }
         <div class="content-wrapper">
             <div id="post-content" class="entry-content"></div>
         </div>
+
+        <!-- Related Posts Section -->
+        <section class="related-section" id="related-section" style="display:none;">
+            <h3 class="related-title">Latest Articles</h3>
+            <div class="related-grid" id="related-posts"></div>
+        </section>
 
     </article>
 
@@ -338,6 +404,9 @@ a:hover { opacity: 0.8; }
             loading.style.display = 'none';
             article.style.display = 'block';
 
+            // Load Related Posts
+            loadRelatedPosts(post.id);
+
             // Parallax Effect
             window.addEventListener('scroll', function() {
                 const scrolled = window.pageYOffset;
@@ -353,6 +422,46 @@ a:hover { opacity: 0.8; }
         function handleError() {
             document.getElementById('loading').style.display = 'none';
             document.getElementById('error-message').style.display = 'block';
+        }
+
+        function loadRelatedPosts(currentId) {
+            // Fetch 3 latest posts, excluding current
+            const apiUrl = `/wp-json/wp/v2/posts?per_page=3&exclude=${currentId}&_embed&v=${Date.now()}`;
+            
+            fetch(apiUrl)
+                .then(res => {
+                    if(!res.ok) throw new Error('Related fetch fail');
+                    return res.json();
+                })
+                .then(posts => {
+                    if (!posts || posts.length === 0) return;
+                    
+                    const container = document.getElementById('related-posts');
+                    const section = document.getElementById('related-section');
+                    
+                    const html = posts.map(p => {
+                        let img = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iMjUwIiB2aWV3Qm94PSIwIDAgNDAwIDI1MCI+PHJlY3QgZmlsbD0iI2RkZCIgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBkeT0iLjNlbSIgZmlsbD0iIzU1NSIgZm9udC1zaXplPSIzMCIgZm9udC1mYW1pbHk9ImFyaWFsIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5Mb2dvPC90ZXh0Pjwvc3ZnPg==';
+                        
+                        // Try to find featured media
+                        if (p._embedded && p._embedded['wp:featuredmedia'] && p._embedded['wp:featuredmedia'][0]) {
+                            img = p._embedded['wp:featuredmedia'][0].source_url;
+                        }
+
+                        return `
+                        <a href="${p.link}" class="post-card">
+                            <div class="card-img" style="background-image:url('${img}')"></div>
+                            <div class="card-body">
+                                <h4>${p.title.rendered}</h4>
+                                <span class="read-more">Read More &rarr;</span>
+                            </div>
+                        </a>
+                        `;
+                    }).join('');
+
+                    container.innerHTML = html;
+                    section.style.display = 'block';
+                })
+                .catch(err => console.log('Related posts error:', err));
         }
     </script>
 </body>
