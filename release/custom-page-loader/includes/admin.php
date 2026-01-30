@@ -382,7 +382,10 @@ function cpl_render_post_template_page() {
         cpl_handle_post_template_submission();
     }
     
-    $post_template = get_option( 'cpl_post_template', [] ); // ['active' => bool, 'uploaded_at' => date]
+    $post_template = get_option( 'cpl_post_template', [] ); // ['active' => bool, 'enabled' => bool, 'uploaded_at' => date]
+    
+    // Ensure 'enabled' defaults to true if not set but template is active (backward compatibility)
+    $is_enabled = isset($post_template['enabled']) ? $post_template['enabled'] : ( !empty($post_template['active']) );
 
     ?>
     <div class="wrap">
@@ -390,27 +393,53 @@ function cpl_render_post_template_page() {
         <p>Upload a single HTML design (`.zip`) that will replace the design of <strong>ALL single blog posts</strong>.</p>
         
         <div class="card" style="max-width: 600px; padding: 20px; margin-top: 20px;">
-            <h2>Upload Template</h2>
             
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:15px; margin-bottom:15px;">
+                <h2 style="margin:0;">Template Stats</h2>
+                
+                <?php if ( ! empty( $post_template['active'] ) ) : ?>
+                    <form method="post">
+                        <input type="hidden" name="cpl_action" value="toggle_post_template">
+                        <input type="hidden" name="new_state" value="<?php echo $is_enabled ? '0' : '1'; ?>">
+                        <?php wp_nonce_field( 'cpl_post_template_action', 'cpl_nonce' ); ?>
+                        
+                        <?php if ( $is_enabled ) : ?>
+                             <div class="current-status" style="display:inline-block; margin-right:15px; color:#00a32a; font-weight:bold;">
+                                ● Live on Site
+                             </div>
+                             <button type="submit" class="button">Turn OFF</button>
+                        <?php else : ?>
+                             <div class="current-status" style="display:inline-block; margin-right:15px; color:#d63638; font-weight:bold;">
+                                ● Disabled
+                             </div>
+                             <button type="submit" class="button button-primary">Turn ON</button>
+                        <?php endif; ?>
+                    </form>
+                <?php endif; ?>
+            </div>
+
             <?php if ( ! empty( $post_template['active'] ) ) : ?>
-                <div class="notice notice-success inline" style="margin: 0 0 20px 0;">
-                    <p>
-                        <strong>✅ Template Active</strong><br>
-                        Last updated: <?php echo esc_html( $post_template['uploaded_at'] ); ?>
-                    </p>
-                </div>
+                <?php if ( $is_enabled ) : ?>
+                    <div class="notice notice-success inline" style="margin: 0 0 20px 0;">
+                        <p><strong>✅ Template Active</strong><br>Last updated: <?php echo esc_html( $post_template['uploaded_at'] ); ?></p>
+                    </div>
+                <?php else : ?>
+                     <div class="notice notice-warning inline" style="margin: 0 0 20px 0;">
+                        <p><strong>⏸ Template Paused</strong><br>Posts are currently using the default WordPress theme.</p>
+                    </div>
+                <?php endif; ?>
             <?php else : ?>
-                <div class="notice notice-warning inline" style="margin: 0 0 20px 0;">
+                <div class="notice notice-info inline" style="margin: 0 0 20px 0;">
                     <p>No custom post template uploaded. WordPress default theme is used.</p>
                 </div>
             <?php endif; ?>
 
+            <h3 style="margin-top:20px;">Update Template</h3>
             <form method="post" enctype="multipart/form-data">
                 <input type="hidden" name="cpl_action" value="upload_post_template">
                 <?php wp_nonce_field( 'cpl_post_template_action', 'cpl_nonce' ); ?>
                 
                 <p>
-                    <label style="display:block; margin-bottom:5px;"><strong>Select .zip File (index.html, style.css...)</strong></label>
                     <input type="file" name="post_template_file" accept=".zip" required>
                 </p>
                 
@@ -423,8 +452,8 @@ function cpl_render_post_template_page() {
                     <input type="submit" class="button button-primary" value="Upload & Apply">
                     
                     <?php if ( ! empty( $post_template['active'] ) ) : ?>
-                        <input type="submit" name="delete_template" class="button button-link-delete" value="Disable & Delete Template" 
-                               onclick="return confirm('Are you sure? This will revert all posts to standard theme.');">
+                        <input type="submit" name="delete_template" class="button button-link-delete" value="Delete Template Files" 
+                               onclick="return confirm('Are you sure? This will permanently delete the custom files.');" style="float:right;">
                     <?php endif; ?>
                 </p>
             </form>
@@ -450,6 +479,20 @@ function cpl_render_post_template_page() {
 }
 
 function cpl_handle_post_template_submission() {
+    // Handle Toggle
+    if ( isset($_POST['cpl_action']) && $_POST['cpl_action'] === 'toggle_post_template' ) {
+         $new_state = ( $_POST['new_state'] === '1' );
+         
+         $post_template = get_option( 'cpl_post_template', [] );
+         $post_template['enabled'] = $new_state;
+         
+         update_option( 'cpl_post_template', $post_template );
+         
+         echo $new_state ? '<div class="notice notice-success"><p>Template Enabled.</p></div>' 
+                         : '<div class="notice notice-warning"><p>Template Disabled.</p></div>';
+         return;
+    }
+
     if ( isset( $_POST['delete_template'] ) ) {
         cpl_delete_directory( CPL_UPLOAD_DIR . '/_post_template' );
         delete_option( 'cpl_post_template' );
@@ -478,8 +521,12 @@ function cpl_handle_post_template_submission() {
     } else {
         cpl_flatten_directory( $target_dir );
         
+        $current_opts = get_option( 'cpl_post_template', [] );
+        $is_enabled = isset( $current_opts['enabled'] ) ? $current_opts['enabled'] : true;
+        
         update_option( 'cpl_post_template', [
             'active' => true,
+            'enabled' => $is_enabled, // Preserve state or default true on first upload
             'folder' => '_post_template',
             'uploaded_at' => current_time( 'mysql' )
         ] );

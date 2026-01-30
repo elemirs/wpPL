@@ -68,17 +68,22 @@ function cpl_intercept_request() {
     // --- 4. Single Post Template Detection ---
     if ( is_single() ) {
         $post_template = get_option('cpl_post_template', []);
-        if ( ! empty( $post_template['active'] ) ) {
+        // Check ONLY if active AND explicitly enabled
+        if ( ! empty( $post_template['active'] ) && ! empty( $post_template['enabled'] ) ) {
             cpl_serve_landing_page( $post_template, 'POST_TEMPLATE' );
             exit;
         }
     }
 
     // --- 5. Post Template Assets Detection (Virtual Path) ---
-    // Detects requests like /_cpl_pt/style.css
-    if ( strpos( $request_path, '/_cpl_pt/' ) === 0 ) {
-         $asset_rel_path = substr( $request_path, strlen( '/_cpl_pt/' ) );
+    // Detects requests like /_cpl_pt/style.css or /mysite/_cpl_pt/style.css
+    // Robust check: look for /_cpl_pt/ anywhere in path
+    if ( strpos( $request_path, '/_cpl_pt/' ) !== false ) {
+         $parts = explode( '/_cpl_pt/', $request_path );
+         $asset_rel_path = end( $parts ); // Take everything after the marker
+         
          $post_template = get_option('cpl_post_template', []);
+         // Still serve assets if file exists, even if disabled (to prevent broken cache/imgs if toggled quickly)
          if ( ! empty( $post_template['active'] ) ) {
              if ( cpl_check_and_serve_asset( $post_template['folder'], $asset_rel_path ) ) {
                  exit;
